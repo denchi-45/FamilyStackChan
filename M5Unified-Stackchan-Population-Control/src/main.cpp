@@ -230,42 +230,7 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *recvData, int len) {
   #endif
 #ifdef Slave
   // if(now_mode == Synchronization){
-  //   Serial.printf("%s\n",buf);
-  //   char gazeString[20];
-  //   memcpy(gazeString, buf,20);
-  //   Serial.printf("cpy %s\n",gazeString);
-  //   char gazeStringX[8];
-  //   char gazeStringY[8];
-  //   int i = 0;
-  //   int count = 0;
-  //   int bufCount[2] = {0,0};
-  //   // メッセージを,で区切った左右の文字数を算出
-  //   while(buf[i] != '\0'){
-  //     if(buf[i] == ','){
-  //       count++;
-  //     }else{
-  //       bufCount[count]++;
-  //     }
-  //     i++;
-  //   }
-  //   Serial.printf("count x: %d, y: %d\n",bufCount[0], bufCount[1]);
-  //   // 受け取ったメッセージをXとYに分解
-  //   for(int j = 0; j < bufCount[0]; j++){
-  //     gazeStringX[j] = gazeString[j];
-  //   }
-  //   for(int j = 0; j < bufCount[1]; j++){
-  //     gazeStringY[j] = gazeString[bufCount[0]+1+j];
-  //   }
-  //   // 分解した文字列ををfloatに変換
-  //   float reciveGazeX = atof(gazeStringX);
-  //   float reciveGazeY = atof(gazeStringY);
-    
-  //   Serial.printf("\ngazeX : %f\n",gazeX);
-  //   Serial.printf("gazeY : %f\n",gazeY);
 
-  //   masterGaze[0] = reciveGazeX;
-  //   masterGaze[1] = reciveGazeY;
-  // }
 #endif
   
 

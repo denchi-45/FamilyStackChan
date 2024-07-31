@@ -1,0 +1,58 @@
+; PlatformIO Project Configuration File
+;
+;   Build options: build flags, source filter
+;   Upload options: custom upload port, speed and extra flags
+;   Library options: dependencies, extra library storages
+;   Advanced options: extra scripting
+;
+; Please visit documentation for the other options and examples
+; https://docs.platformio.org/page/projectconf.html
+
+[platformio]
+default_envs = m5stack-fire
+
+[env]
+platform = espressif32
+framework = arduino
+monitor_speed = 115200
+
+[env:m5stack-fire]
+platform = espressif32
+board = m5stack-fire
+framework = arduino
+monitor_speed = 115200
+lib_deps = 
+	m5stack/M5Unified @ 0.1.4
+	m5stack/M5Stack@^0.4.4
+	earlephilhower/ESP8266Audio @ ^1.9.7
+	meganetaaan/M5Stack-Avatar@^0.8.2
+	arminjo/ServoEasing@^2.4.0
+	madhephaestus/ESP32Servo@^0.9.0
+	bblanchon/ArduinoJson @ ^6
+	ESP32WebServer
+	ESPmDNS
+	neopixel
+	adafruit/Adafruit NeoPixel@^1.11.0
+	https://github.com/mongonta0716/SCServo
+
+[env:m5stack-core2]
+platform = espressif32
+platform_packages = framework-arduinoespressif32 @ https://github.com/espressif/arduino-esp32.git#2.0.4
+board = m5stack-core2
+framework = arduino
+upload_speed = 1500000
+monitor_speed = 115200
+monitor_filters = esp32_exception_decoder
+lib_deps = 
+	m5stack/M5Unified @ 0.1.4
+	m5stack/M5Stack@^0.4.4
+	earlephilhower/ESP8266Audio @ ^1.9.7
+	meganetaaan/M5Stack-Avatar@^0.8.2
+	arminjo/ServoEasing@^2.4.0
+	madhephaestus/ESP32Servo@^0.9.0
+	bblanchon/ArduinoJson @ ^6
+	ESP32WebServer
+	ESPmDNS
+	neopixel
+	adafruit/Adafruit NeoPixel@^1.11.0
+    https://github.com/mongonta0716/SCServo
