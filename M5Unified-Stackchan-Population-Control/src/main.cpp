@@ -1,25 +1,53 @@
+#define USE_SERVO
+
+#define FS90MG
+//#define SCS0009
+
+//#define Master
+#define Slave
+
 #include <M5Unified.h>
 #include <Avatar.h>
 #include <ServoEasing.hpp> // https://github.com/ArminJo/ServoEasing 
 #include <esp_now.h>
 #include <WiFi.h>
 #include <BluetoothSerial.h>
+#include <bitset>
+
+
+#ifdef SCS0009
 #include <SCServo.h>
+#endif
+#include <iostream>
 
-#define USE_SERVO
+using namespace std;
 
-// #define FS90MG
-#define SCS0009
 
-char buf[2];
-uint8_t LED[2];
-uint8_t broadcastAddress[] = {0x78, 0x21, 0x84, 0x93, 0xB9, 0x34};
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+uint8_t stackchan1[] = {0x78, 0x21, 0x84, 0x93, 0xB9, 0x34};
 esp_now_peer_info_t peerInfo;
 using namespace m5avatar;
 boolean flag = false; 
 Avatar avatar;
 int temp = 0;
 
+#ifdef Master
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+WebServer server(80);
+
+const char *ssid = "StackChan";
+const char *pass = "hori12345";
+
+#endif
+#ifdef Slave
+float masterGaze[2];
+#endif
+float gazeX;
+float gazeY;
+float lastGazeX;
+float lastGazeY;
 
 #ifdef USE_SERVO
 #if defined(ARDUINO_M5STACK_Core2)
@@ -53,11 +81,16 @@ SCSCL sc;
 #endif
 #endif
 
-bool servo_home = false;
+enum mode{
+  Standby,
+  Random,
+  Synchronization
+};
+static mode now_mode;
 
+bool servo_home = false;
 void servo(void *args)
 {
-  float gazeX, gazeY;
   DriveContext *ctx = (DriveContext *)args;
   Avatar *avatar = ctx->getAvatar();
   for (;;)
@@ -66,14 +99,13 @@ void servo(void *args)
 #ifdef FS90MG
     if(!servo_home)
     {
-    avatar->getGaze(&gazeY, &gazeX);
-    servo_x.setEaseTo(START_DEGREE_VALUE_X + (int)(30.0 * gazeX));
+    servo_x.setEaseTo(START_DEGREE_VALUE_X + (int)(50.0 * gazeX));
     if(gazeY < 0) {
       int tmp = (int)(10.0 * gazeY);
       if(tmp > 10) tmp = 10;
       servo_y.setEaseTo(START_DEGREE_VALUE_Y + tmp);
     } else {
-      servo_y.setEaseTo(START_DEGREE_VALUE_Y + (int)(20.0 * gazeY));
+      servo_y.setEaseTo(START_DEGREE_VALUE_Y + (int)(10.0 * gazeY));
     }
     } else {
 //     avatar->setRotation(gazeX * 5);
@@ -88,15 +120,17 @@ void servo(void *args)
     if(!servo_home)
     {
       avatar->getGaze(&gazeY, &gazeX);
-      sc.WritePos(X, START_DEGREE_VALUE_X + (int)(50.0 * gazeX), 1500);
+      sc.WritePos(X, START_DEGREE_VALUE_X + (int)(70.0 * gazeX), 3000);
       if(gazeY < 0) {
         int tmp = (int)(10.0 * gazeY);
         if(tmp > 10) tmp = 10;
-        sc.WritePos(Y, START_DEGREE_VALUE_Y + tmp, 1500);
+        sc.WritePos(Y, START_DEGREE_VALUE_Y + tmp, 3000);
       } else {
-        sc.WritePos(Y, START_DEGREE_VALUE_Y + + (int)(20.0 * gazeY), 1500);
+        sc.WritePos(Y, START_DEGREE_VALUE_Y + + (int)(20.0 * gazeY), 3000);
       }
-
+    }else{
+      sc.WritePos(X, START_DEGREE_VALUE_X, 3000);
+      sc.WritePos(Y, START_DEGREE_VALUE_Y, 3000);
     }
 #endif
 #endif
@@ -108,10 +142,10 @@ void Servo_setup() {
 #ifdef USE_SERVO
 #ifdef FS90MG
   if (servo_x.attach(SERVO_PIN_X, START_DEGREE_VALUE_X, DEFAULT_MICROSECONDS_FOR_0_DEGREE, DEFAULT_MICROSECONDS_FOR_180_DEGREE)) {
-    Serial.print("Error attaching servo x");
+    Serial.print("Error attaching servo X");
   }
   if (servo_y.attach(SERVO_PIN_Y, START_DEGREE_VALUE_Y, DEFAULT_MICROSECONDS_FOR_0_DEGREE, DEFAULT_MICROSECONDS_FOR_180_DEGREE)) {
-    Serial.print("Error attaching servo y");
+    Serial.print("Error attaching servo Y");
   }
   servo_x.setEasingType(EASE_QUADRATIC_IN_OUT);
   servo_y.setEasingType(EASE_QUADRATIC_IN_OUT);
@@ -157,10 +191,172 @@ struct box_t
 };
 static box_t box_servo;
 
+
+
+void sendMessage(uint8_t *buf, int data_num){
+
+  esp_err_t result = esp_now_send(broadcastAddress, buf, data_num);
+  if (result == ESP_OK) {//送信が成功したら
+    Serial.println("success");
+    Serial.printf("message : %s\n", buf);
+  }
+  else {
+    Serial.println("Error");
+  }
+}
+
 //送信が完了した時の処理
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Deli_Success" : "Deli_Fail");
 }
+
+//受信データ完了した時の処理
+void OnDataRecv(const uint8_t *mac, const uint8_t *recvData, int len) {
+  char buf[128];
+  memcpy(&buf[0], recvData, len);
+  #ifdef Slave
+  if(buf[0] == 0xA0 && len == 2){
+    if(buf[1] == 0x00){
+      now_mode = Standby;
+      Serial.printf("stanby mode\n");
+    }else if(buf[1] == 0x01){
+      now_mode = Random;
+      Serial.printf("random mode\n");
+    }else if(buf[1] == 0x02){
+      now_mode = Synchronization;
+      Serial.printf("Synchronization mode\n");
+    }
+  }
+  #endif
+#ifdef Slave
+  // if(now_mode == Synchronization){
+  //   Serial.printf("%s\n",buf);
+  //   char gazeString[20];
+  //   memcpy(gazeString, buf,20);
+  //   Serial.printf("cpy %s\n",gazeString);
+  //   char gazeStringX[8];
+  //   char gazeStringY[8];
+  //   int i = 0;
+  //   int count = 0;
+  //   int bufCount[2] = {0,0};
+  //   // メッセージを,で区切った左右の文字数を算出
+  //   while(buf[i] != '\0'){
+  //     if(buf[i] == ','){
+  //       count++;
+  //     }else{
+  //       bufCount[count]++;
+  //     }
+  //     i++;
+  //   }
+  //   Serial.printf("count x: %d, y: %d\n",bufCount[0], bufCount[1]);
+  //   // 受け取ったメッセージをXとYに分解
+  //   for(int j = 0; j < bufCount[0]; j++){
+  //     gazeStringX[j] = gazeString[j];
+  //   }
+  //   for(int j = 0; j < bufCount[1]; j++){
+  //     gazeStringY[j] = gazeString[bufCount[0]+1+j];
+  //   }
+  //   // 分解した文字列ををfloatに変換
+  //   float reciveGazeX = atof(gazeStringX);
+  //   float reciveGazeY = atof(gazeStringY);
+    
+  //   Serial.printf("\ngazeX : %f\n",gazeX);
+  //   Serial.printf("gazeY : %f\n",gazeY);
+
+  //   masterGaze[0] = reciveGazeX;
+  //   masterGaze[1] = reciveGazeY;
+  // }
+#endif
+  
+
+}
+
+#ifdef Master
+void handleNotFound() {
+  String message = "File Not Found\n\n"
+                   + server.uri() + " "
+                   + ((server.method() == HTTP_GET) ? "GET" : "POST")
+                   + "\nArguments: " + server.args() + "\n";
+  for (int i = 0; i < server.args(); i++)
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  server.send(404, "text/plain", message);
+}
+
+void handleRoot(){
+  uint8_t buf[2];
+  buf[0] = 0xA0;
+  buf[1] = 0x00;
+  sendMessage(buf, 2);
+
+  String html;
+  html = "<!DOCTYPE html>";
+  html += "<html>";
+  html += "<head>";
+  html += "<meta name=viewport content=width=100>";
+  html += "</head>";
+  html += "<body>";
+  html += "<h1>Hello Stack Chan</h1>";
+  html += "now mode Standby";
+  html += "<form action=Stanby><input type=submit value=Stanby></form>";
+  html += "<form action=Random><input type=submit value=Random></form>";
+  html += "<form action=Synchronization><input type=submit value=Synchronization></form>";
+
+  html += "</body>";
+  html += "</html>";
+  server.send(200, "text/html", html);
+}
+
+void handleRandom(){
+  uint8_t buf[2];
+  buf[0] = 0xA0;
+  buf[1] = 0x01;
+  sendMessage(buf, 2);
+
+  String html;
+  html = "<!DOCTYPE html>";
+  html += "<html>";
+  html += "<head>";
+  html += "<meta name=viewport content=width=100>";
+  html += "</head>";
+  html += "<body>";
+  html += "<h1>Hello Stack Chan</h1>";
+  html += "now mode Random";
+  html += "<form action=Stanby><input type=submit value=Stanby></form>";
+  html += "<form action=Random><input type=submit value=Random></form>";
+  html += "<form action=Synchronization><input type=submit value=Synchronization></form>";
+
+  html += "</body>";
+  html += "</html>";
+
+  now_mode = Random;
+  server.send(200, "text/html", html);
+}
+void handleSynchronization(){
+  uint8_t buf[2];
+  buf[0] = 0xA0;
+  buf[1] = 0x02;
+  sendMessage(buf, 2);
+
+  String html;
+  html = "<!DOCTYPE html>";
+  html += "<html>";
+  html += "<head>";
+  html += "<meta name=viewport content=width=100>";
+  html += "</head>";
+  html += "<body>";
+  html += "<h1>Hello Stack Chan</h1>";
+  html += "now mode Synchronization";
+  html += "<form action=Stanby><input type=submit value=Stanby></form>";
+  html += "<form action=Random><input type=submit value=Random></form>";
+  html += "<form action=Synchronization><input type=submit value=Synchronization></form>";
+
+  html += "</body>";
+  html += "</html>";
+
+  now_mode = Synchronization;
+  server.send(200, "text/html", html);
+}
+#endif
 
 void setup()
 {
@@ -169,6 +365,7 @@ void setup()
 
   M5.begin(cfg);
 
+  
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
@@ -182,6 +379,7 @@ void setup()
     return;
   }
   esp_now_register_send_cb(OnDataSent);
+  esp_now_register_recv_cb(OnDataRecv);   //ESP-NOWでデータ受信した時のコールバック関数を登録
 
   avatar.init(); // start drawing
 
@@ -195,39 +393,73 @@ void setup()
   const auto offs_y = (r->getHeight() - M5.Display.height()) / 2;
   avatar.setPosition(-offs_y, -offs_x);
 
+  #ifdef Master
+  WiFi.softAP(ssid, pass);
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print("AP address: ");  Serial.println(myIP);
+
+  server.on("/", handleRoot);
+  server.on("/Random", handleRandom);
+  server.on("/Synchronization", handleSynchronization);
+
+  server.onNotFound(handleNotFound);
+  server.begin();
+  Serial.println("HTTP server started");
+  #endif
+
+  
+  now_mode = Standby;
+
   #ifdef USE_SERVO
   Servo_setup();
   avatar.addTask(servo, "servo");
   #endif
+
+  avatar.getGaze(&gazeX, &gazeY);
+  lastGazeX = gazeX;
+  lastGazeY = gazeY;
 }
 
 void loop()
 {
   // avatar's face updates in another thread
   // so no need to loop-by-loop rendering
-  M5.update();
+  //M5.update();
+#ifdef Master
+  server.handleClient();
+#endif
 
-  if(M5.BtnA.wasPressed()){
-    Serial.println("push Btn b");
-    if(flag==false){
-      flag = true;
-      temp = 1;
-    }else{
-      flag = false;
-      temp = 0;
-    }
-    sprintf(buf,"%d",temp);
-    memcpy(LED,buf,strlen(buf));
-    esp_err_t result = esp_now_send(broadcastAddress, LED, sizeof(buf));
+  switch (now_mode)
+  {
+  case Standby:
+    avatar.setExpression(Expression::Neutral);
+    servo_home = true;
+    break;
+  
+  case Random:
+    avatar.setExpression(Expression::Happy);
+    servo_home = false;
+    break;
 
-    if (result == ESP_OK) {//送信が成功したら
-      Serial.println("success");
-      Serial.print("temp : ");
-      Serial.println(temp);
+  case Synchronization:
+    servo_home = false;
+#ifdef Master
+    avatar.getGaze(&gazeX, &gazeY);
+    if(lastGazeX != gazeX || lastGazeY != gazeY){
+      char message[20];
+      sprintf(message,"%f,%f",gazeX,gazeY);
+      sendMessage((uint8_t *)message,20);
+      lastGazeX = gazeX;
+      lastGazeY = gazeY;
     }
-    else {
-      Serial.println("Error");
-    }
-    delay(500);
+    delay(100);
+#endif
+    avatar.setExpression(Expression::Doubt);
+    break;
+
+  default:
+    break;
   }
+  
+  delay(10);
 }
